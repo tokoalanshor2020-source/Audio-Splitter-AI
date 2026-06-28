@@ -1,0 +1,6 @@
+{
+  "name": "Audio Splitter & AI Lyric Synchronizer",
+  "description": "A professional tool to split audio files and synchronize lyrics or scripts automatically using AI alignment, featuring an interactive waveform editor and a downloadable Python desktop application project.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
