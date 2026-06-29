@@ -343,6 +343,36 @@ export default function App() {
     }
   };
 
+  const handleSrtFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        if (evt.target?.result) {
+          const rawText = evt.target.result as string;
+          try {
+            const parsedSegs = parseSrtContent(rawText);
+            if (parsedSegs.length === 0) {
+              alert('Tidak dapat mengurai segmen dari berkas .srt ini. Pastikan format berkas .srt valid.');
+              return;
+            }
+            
+            setSegments(parsedSegs);
+            
+            const plainTexts = parsedSegs.map(s => s.text).join('\n');
+            setLyricsText(plainTexts);
+            
+            addLog(`Berhasil mengimpor berkas .srt: ${file.name}. Terdeteksi ${parsedSegs.length} segmen audio!`, 'success');
+          } catch (err: any) {
+            addLog(`Gagal memuat berkas .srt: ${err.message || err}`, 'error');
+            alert(`Gagal memuat berkas .srt: ${err.message || err}`);
+          }
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
   // Sync Audio with lyrics text via server-side Gemini AI
   const handleAIAlyricAlignment = async () => {
     const textLines = lyricsText.split('\n').map(l => l.trim()).filter(l => l);
@@ -1293,6 +1323,10 @@ export default function App() {
         await new Promise(resolve => setTimeout(resolve, 30));
       }
 
+      // Automatically include subtitles.srt inside the ZIP archive for the user
+      zip.file('subtitles.srt', generateSrtContent(segments));
+      zip.file('lyrics_synced.lrc', segments.map(s => `[${formatLrcTime(s.start)}]${s.text}`).join('\n'));
+
       setExportStatus('Mengompresi potongan audio ke dalam ZIP...');
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const downloadUrl = URL.createObjectURL(zipBlob);
@@ -1306,13 +1340,61 @@ export default function App() {
       URL.revokeObjectURL(downloadUrl);
 
       setExportProgress(null);
-      addLog(`Slicing Sukses! ${segments.length} file ${exportFormat} telah diekspor dan diunduh.`, 'success');
-      alert(`Berhasil mengekspor ${segments.length} file audio format ${exportFormat}!`);
+      addLog(`Slicing Sukses! ${segments.length} file ${exportFormat} dan berkas subtitle (.srt) telah diekspor ke dalam ZIP.`, 'success');
+      alert(`Berhasil mengekspor ${segments.length} file audio dan subtitle format ${exportFormat}!`);
     } catch (e: any) {
       setExportProgress(null);
       addLog(`Ekspor Gagal: ${e.message || e}`, 'error');
       alert(`Gagal mengekspor audio: ${e.message || e}`);
     }
+  };
+
+  const formatSrtTime = (secs: number): string => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = Math.floor(secs % 60);
+    const ms = Math.round((secs % 1) * 1000);
+    
+    const pad = (num: number, size: number) => {
+      let s = num.toString();
+      while (s.length < size) s = "0" + s;
+      return s;
+    };
+    
+    return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
+  };
+
+  const generateSrtContent = (segs: AudioSegment[]): string => {
+    return segs
+      .map((seg, idx) => {
+        const index = idx + 1;
+        const startTime = formatSrtTime(seg.start);
+        const endTime = formatSrtTime(seg.end);
+        return `${index}\n${startTime} --> ${endTime}\n${seg.text}\n`;
+      })
+      .join('\n');
+  };
+
+  const exportSrtSubtitleFile = () => {
+    if (segments.length === 0) {
+      alert('Belum ada data segmen untuk diekspor!');
+      return;
+    }
+
+    addLog('Menghasilkan berkas subtitle (.srt)...', 'info');
+    const srtContent = generateSrtContent(segments);
+    const srtBlob = new Blob([srtContent], { type: 'text/srt;charset=utf-8' });
+    const downloadUrl = URL.createObjectURL(srtBlob);
+    
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `AcousticSplit_Subtitles.srt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(downloadUrl);
+    
+    addLog(`Sukses mengekspor ${segments.length} baris ke file subtitles.srt`, 'success');
   };
 
   const performDemoExportZip = async () => {
@@ -1321,8 +1403,9 @@ export default function App() {
     const JSZipModule = (await import('jszip')).default;
     const zip = new JSZipModule();
 
-    // Export lyrics
+    // Export lyrics & subtitle
     zip.file('lyrics_synced.lrc', segments.map(s => `[${formatLrcTime(s.start)}]${s.text}`).join('\n'));
+    zip.file('subtitles.srt', generateSrtContent(segments));
     zip.file('metadata_info.txt', `Original: ${audioMetadata?.name}\nTotal Slices: ${segments.length}\nFormat: ${exportFormat}\nDate: ${new Date().toLocaleDateString()}`);
 
     // Create mini audio beeps for demo
@@ -1344,7 +1427,7 @@ export default function App() {
     URL.revokeObjectURL(url);
     
     setExportProgress(null);
-    addLog(`Demo Export Sukses! Mengunduh paket metadata & berkas teks lirik LRC format ${exportFormat}.`, 'success');
+    addLog(`Demo Export Sukses! Mengunduh paket metadata, berkas teks lirik LRC, dan berkas subtitle (.srt) format ${exportFormat}.`, 'success');
   };
 
   const formatLrcTime = (secs: number): string => {
@@ -1935,16 +2018,33 @@ export default function App() {
                     <input 
                       type="file" 
                       id="text-file-upload" 
-                      accept=".txt,.lrc,.srt" 
+                      accept=".txt,.lrc" 
                       onChange={handleTextFileUpload} 
                       className="hidden" 
                     />
                     <label 
                       htmlFor="text-file-upload" 
                       className="text-[9px] bg-[#2A2B2F] hover:bg-[#36373C] text-gray-300 border border-white/5 px-2.5 py-1 rounded-sm cursor-pointer transition-colors flex items-center gap-1 font-mono uppercase tracking-wider"
+                      title="Impor lirik/teks mentah (.txt, .lrc)"
                     >
                       <FolderOpen className="w-3 h-3 text-cyan-500" />
                       Import LRC/TXT
+                    </label>
+
+                    <input 
+                      type="file" 
+                      id="srt-import-upload" 
+                      accept=".srt" 
+                      onChange={handleSrtFileUpload} 
+                      className="hidden" 
+                    />
+                    <label 
+                      htmlFor="srt-import-upload" 
+                      className="text-[9px] bg-[#2A2B2F] hover:bg-[#36373C] text-gray-300 border border-white/5 px-2.5 py-1 rounded-sm cursor-pointer transition-colors flex items-center gap-1 font-mono uppercase tracking-wider"
+                      title="Impor subtitle .srt untuk otomatis memotong audio sesuai timestamp"
+                    >
+                      <FileText className="w-3 h-3 text-cyan-500" />
+                      Import .SRT (Auto-Split)
                     </label>
                   </div>
                 </div>
@@ -2568,13 +2668,23 @@ export default function App() {
                   </label>
                 </div>
               )}
-              <button
-                onClick={triggerAudioSlicingExport}
-                className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-[#0E0F11] text-xs font-mono font-bold uppercase tracking-wider rounded-sm transition-all flex items-center justify-center gap-2 shadow-[0_0_12px_rgba(6,182,212,0.4)] cursor-pointer"
-              >
-                <Download className="w-4 h-4 text-[#0E0F11]" />
-                Slice & Export (.zip)
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={triggerAudioSlicingExport}
+                  className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-[#0E0F11] text-xs font-mono font-bold uppercase tracking-wider rounded-sm transition-all flex items-center justify-center gap-2 shadow-[0_0_12px_rgba(6,182,212,0.4)] cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-[#0E0F11]" />
+                  Slice & Export (.zip)
+                </button>
+                <button
+                  onClick={exportSrtSubtitleFile}
+                  className="w-full py-2 bg-[#1A1B1F] hover:bg-[#25262B] border border-[#2A2B2F] text-cyan-400 hover:text-cyan-300 text-xs font-mono font-bold uppercase tracking-wider rounded-sm transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                  title="Ekspor berkas subtitle .srt siap upload ke youtube"
+                >
+                  <FileText className="w-4 h-4 text-cyan-400" />
+                  Export Subtitles (.srt)
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2714,4 +2824,68 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function parseSrtTimestampToSeconds(timeStr: string): number {
+  // Format: HH:MM:SS,mmm or HH:MM:SS.mmm
+  const regex = /(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/;
+  const match = timeStr.match(regex);
+  if (!match) {
+    const simpleRegex = /(\d{2}):(\d{2}):(\d{2})/;
+    const simpleMatch = timeStr.match(simpleRegex);
+    if (simpleMatch) {
+      const [, h, m, s] = simpleMatch;
+      return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseInt(s, 10);
+    }
+    const floatSec = parseFloat(timeStr);
+    return isNaN(floatSec) ? 0 : floatSec;
+  }
+  const [, h, m, s, ms] = match;
+  return parseInt(h, 10) * 3600 + parseInt(m, 10) * 60 + parseInt(s, 10) + parseInt(ms, 10) / 1000;
+}
+
+function parseSrtContent(srtText: string): AudioSegment[] {
+  const segmentsList: AudioSegment[] = [];
+  const cleanText = srtText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const blocks = cleanText.split(/\n\s*\n/);
+  
+  let idCounter = 1;
+  for (const block of blocks) {
+    const lines = block.trim().split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length < 2) continue;
+    
+    let timeLineIdx = 0;
+    if (/^\d+$/.test(lines[0])) {
+      timeLineIdx = 1;
+    }
+    
+    const timeLine = lines[timeLineIdx];
+    if (!timeLine || !timeLine.includes('-->')) continue;
+    
+    const parts = timeLine.split('-->').map(p => p.trim());
+    if (parts.length !== 2) continue;
+    
+    const startSec = parseSrtTimestampToSeconds(parts[0]);
+    const endSec = parseSrtTimestampToSeconds(parts[1]);
+    
+    if (isNaN(startSec) || isNaN(endSec)) continue;
+    
+    const textLines = lines.slice(timeLineIdx + 1);
+    const text = textLines.join(' ');
+    
+    const cleanTxtForFilename = text.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 15);
+    
+    segmentsList.push({
+      id: idCounter,
+      text: text,
+      start: parseFloat(startSec.toFixed(2)),
+      end: parseFloat(endSec.toFixed(2)),
+      confidence: 100,
+      filename: `${idCounter.toString().padStart(2, '0')}_${cleanTxtForFilename}`
+    });
+    
+    idCounter++;
+  }
+  
+  return segmentsList;
 }
