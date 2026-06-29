@@ -86,6 +86,10 @@ export default function App() {
   const [exportProgress, setExportProgress] = useState<number | null>(null);
   const [exportStatus, setExportStatus] = useState<string>('');
 
+  // Bulk Fade States
+  const [bulkFadeIn, setBulkFadeIn] = useState<string>('0.10');
+  const [bulkFadeOut, setBulkFadeOut] = useState<string>('0.10');
+
   // Bulk Rename States
   const [showBulkRenameModal, setShowBulkRenameModal] = useState<boolean>(false);
   const [bulkRenameText, setBulkRenameText] = useState<string>('');
@@ -1067,6 +1071,28 @@ export default function App() {
     }));
   };
 
+  const handleUpdateSegmentFade = (id: number, fadeIn: number, fadeOut: number) => {
+    setSegments(prev => prev.map(s => {
+      if (s.id === id) {
+        return {
+          ...s,
+          fadeIn: Math.max(0, fadeIn),
+          fadeOut: Math.max(0, fadeOut)
+        };
+      }
+      return s;
+    }));
+  };
+
+  const handleApplyBulkFade = (fadeIn: number, fadeOut: number) => {
+    setSegments(prev => prev.map(s => ({
+      ...s,
+      fadeIn: Math.max(0, fadeIn),
+      fadeOut: Math.max(0, fadeOut)
+    })));
+    addLog(`Diterapkan fade massal ke seluruh segmen (Fade In: ${fadeIn}s, Fade Out: ${fadeOut}s)`, 'success');
+  };
+
   const deleteSegment = (id: number) => {
     setSegments(prev => {
       const filtered = prev.filter(s => s.id !== id);
@@ -1283,13 +1309,16 @@ export default function App() {
         let audioBlob: Blob;
         let ext = exportFormat.toLowerCase();
 
+        const fIn = seg.fadeIn ?? 0;
+        const fOut = seg.fadeOut ?? 0;
+
         if (ext === 'mp3') {
-          audioBlob = encodeMp3(audioBuffer, seg.start, seg.end, mp3Bitrate);
+          audioBlob = encodeMp3(audioBuffer, seg.start, seg.end, mp3Bitrate, fIn, fOut);
         } else if (ext === 'wav') {
-          audioBlob = encodeWav(audioBuffer, seg.start, seg.end);
+          audioBlob = encodeWav(audioBuffer, seg.start, seg.end, fIn, fOut);
         } else {
           // Use high-fidelity server-side FFmpeg transcoder
-          const wavBlob = encodeWav(audioBuffer, seg.start, seg.end);
+          const wavBlob = encodeWav(audioBuffer, seg.start, seg.end, fIn, fOut);
           const wavBase64 = await blobToBase64(wavBlob);
           
           let targetFormat = ext;
@@ -2179,6 +2208,55 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Bulk Fade-In and Fade-Out Option Panel */}
+              <div className="bg-[#16171B] border border-[#23242A] rounded-sm p-3 mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-inner">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-cyan-400" />
+                  <span className="text-xs text-gray-300 font-medium font-mono uppercase tracking-wide">Fade Massal Ke Seluruh Audio:</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-gray-500 font-mono font-bold uppercase">In:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="0.05"
+                      value={bulkFadeIn}
+                      onChange={(e) => setBulkFadeIn(e.target.value)}
+                      className="w-14 bg-[#0E0F11] border border-[#2A2B2F] rounded-sm px-1.5 py-0.5 text-xs text-white text-center focus:outline-none focus:border-cyan-500 font-mono"
+                      placeholder="0.10"
+                    />
+                    <span className="text-[10px] text-gray-500 font-mono">s</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-gray-500 font-mono font-bold uppercase">Out:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="0.05"
+                      value={bulkFadeOut}
+                      onChange={(e) => setBulkFadeOut(e.target.value)}
+                      className="w-14 bg-[#0E0F11] border border-[#2A2B2F] rounded-sm px-1.5 py-0.5 text-xs text-white text-center focus:outline-none focus:border-cyan-500 font-mono"
+                      placeholder="0.10"
+                    />
+                    <span className="text-[10px] text-gray-500 font-mono">s</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const fIn = parseFloat(bulkFadeIn) || 0;
+                      const fOut = parseFloat(bulkFadeOut) || 0;
+                      handleApplyBulkFade(fIn, fOut);
+                    }}
+                    className="text-[11px] bg-cyan-600 hover:bg-cyan-500 hover:scale-[1.02] text-[#0E0F11] font-bold px-3 py-1 rounded-sm cursor-pointer transition-all uppercase tracking-wider"
+                    title="Terapkan durasi fade in/out ini ke seluruh segmen audio yang ada"
+                  >
+                    Terapkan
+                  </button>
+                </div>
+              </div>
+
               <div className="overflow-y-auto max-h-[290px] pr-1 space-y-2">
                 {segments.length > 0 ? (
                   segments.map((seg) => {
@@ -2360,6 +2438,40 @@ export default function App() {
                               placeholder="nama_file_output"
                             />
                             <span className="text-[10px] text-gray-500 font-mono font-bold">.{exportFormat.toLowerCase()}</span>
+                          </div>
+                        </div>
+
+                        {/* Fade In & Fade Out Slicing Settings */}
+                        <div className="flex flex-wrap items-center gap-4 mt-2 bg-[#17181D] border border-[#232429] p-2 rounded-sm" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1.5">
+                            <Sliders className="w-3 h-3 text-cyan-500" />
+                            <span className="text-[10px] text-gray-400 font-mono uppercase">Fade In:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="10"
+                              step="0.05"
+                              value={seg.fadeIn ?? 0}
+                              onChange={(e) => handleUpdateSegmentFade(seg.id, parseFloat(e.target.value) || 0, seg.fadeOut ?? 0)}
+                              className="w-14 bg-[#0E0F11] border border-[#2A2B2F] rounded-sm px-1.5 py-0.5 text-xs text-white text-center focus:border-cyan-500 focus:outline-none font-mono"
+                              placeholder="0.0"
+                            />
+                            <span className="text-[10px] text-gray-500 font-mono">s</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Sliders className="w-3 h-3 text-cyan-500" />
+                            <span className="text-[10px] text-gray-400 font-mono uppercase">Fade Out:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="10"
+                              step="0.05"
+                              value={seg.fadeOut ?? 0}
+                              onChange={(e) => handleUpdateSegmentFade(seg.id, seg.fadeIn ?? 0, parseFloat(e.target.value) || 0)}
+                              className="w-14 bg-[#0E0F11] border border-[#2A2B2F] rounded-sm px-1.5 py-0.5 text-xs text-white text-center focus:border-cyan-500 focus:outline-none font-mono"
+                              placeholder="0.0"
+                            />
+                            <span className="text-[10px] text-gray-500 font-mono">s</span>
                           </div>
                         </div>
                       </div>

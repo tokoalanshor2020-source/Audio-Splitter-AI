@@ -1,6 +1,6 @@
 // src/utils/audioEncoder.ts
 // Robust and High-Fidelity Client-Side Audio Multi-Format Encoder
-// Supports WAV, MP3, OGG, and FLAC formats with precision cutting
+// Supports WAV, MP3, OGG, and FLAC formats with precision cutting and fade-in/fade-out editing
 
 // @ts-ignore
 import lamejs from 'lamejs';
@@ -25,9 +25,65 @@ export function writeString(view: DataView, offset: number, string: string) {
 }
 
 /**
+ * Helper to slice channel data from an AudioBuffer and apply linear fade-in and fade-out
+ */
+export function getFadedChannelData(
+  audioBuffer: AudioBuffer,
+  channelIndex: number,
+  startSec: number,
+  endSec: number,
+  fadeInSec: number = 0,
+  fadeOutSec: number = 0
+): Float32Array {
+  const sampleRate = audioBuffer.sampleRate;
+  const startOffset = Math.floor(startSec * sampleRate);
+  const endOffset = Math.floor(endSec * sampleRate);
+  const numSamples = Math.max(0, endOffset - startOffset);
+  
+  // Slice raw channel data
+  const rawData = audioBuffer.getChannelData(channelIndex);
+  const sliced = new Float32Array(numSamples);
+  
+  // Copy data with bounds safety
+  for (let i = 0; i < numSamples; i++) {
+    const srcIndex = startOffset + i;
+    if (srcIndex < rawData.length) {
+      sliced[i] = rawData[srcIndex];
+    }
+  }
+  
+  // Apply linear fade-in if duration is positive
+  if (fadeInSec > 0) {
+    const fadeInSamples = Math.min(numSamples, Math.floor(fadeInSec * sampleRate));
+    for (let i = 0; i < fadeInSamples; i++) {
+      const gain = i / fadeInSamples;
+      sliced[i] *= gain;
+    }
+  }
+  
+  // Apply linear fade-out if duration is positive
+  if (fadeOutSec > 0) {
+    const fadeOutSamples = Math.min(numSamples, Math.floor(fadeOutSec * sampleRate));
+    const startFadeOutIndex = numSamples - fadeOutSamples;
+    for (let i = 0; i < fadeOutSamples; i++) {
+      const gain = 1 - (i / fadeOutSamples);
+      sliced[startFadeOutIndex + i] *= gain;
+    }
+  }
+  
+  return sliced;
+}
+
+/**
  * 1. WAV Encoder (16-bit Signed PCM Lossless)
  */
-export function encodeWav(audioBuffer: AudioBuffer, startSec: number, endSec: number): Blob {
+export function encodeWav(
+  audioBuffer: AudioBuffer, 
+  startSec: number, 
+  endSec: number,
+  fadeInSec: number = 0,
+  fadeOutSec: number = 0
+): Blob {
   const sampleRate = audioBuffer.sampleRate;
   const numChannels = audioBuffer.numberOfChannels;
   
@@ -68,14 +124,13 @@ export function encodeWav(audioBuffer: AudioBuffer, startSec: number, endSec: nu
   
   const channels: Float32Array[] = [];
   for (let c = 0; c < numChannels; c++) {
-    channels.push(audioBuffer.getChannelData(c));
+    channels.push(getFadedChannelData(audioBuffer, c, startSec, endSec, fadeInSec, fadeOutSec));
   }
   
   let offset = 44;
   for (let i = 0; i < numSamples; i++) {
     for (let c = 0; c < numChannels; c++) {
-      const sampleIndex = startOffset + i;
-      let sample = channels[c][sampleIndex];
+      let sample = channels[c][i];
       if (sample > 1) sample = 1;
       else if (sample < -1) sample = -1;
       const s = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
@@ -95,7 +150,9 @@ export function encodeMp3(
   audioBuffer: AudioBuffer,
   startSec: number,
   endSec: number,
-  bitrate: number = 192
+  bitrate: number = 192,
+  fadeInSec: number = 0,
+  fadeOutSec: number = 0
 ): Blob {
   const sampleRate = audioBuffer.sampleRate;
   const numChannels = audioBuffer.numberOfChannels;
@@ -108,10 +165,10 @@ export function encodeMp3(
     throw new Error("Durasi segmen kosong!");
   }
 
-  // Slice channel data
+  // Slice faded channel data
   const channels: Float32Array[] = [];
   for (let c = 0; c < numChannels; c++) {
-    channels.push(audioBuffer.getChannelData(c).slice(startOffset, endOffset));
+    channels.push(getFadedChannelData(audioBuffer, c, startSec, endSec, fadeInSec, fadeOutSec));
   }
 
   // Instantiate the LameJS Mp3Encoder dynamically to support standard imports
@@ -161,7 +218,13 @@ export function encodeMp3(
  * 3. OGG Container PCM/Vorbis Encoder
  * Packages high-quality PCM stream with standard OggS container pages for high compatibility
  */
-export function encodeOgg(audioBuffer: AudioBuffer, startSec: number, endSec: number): Blob {
+export function encodeOgg(
+  audioBuffer: AudioBuffer, 
+  startSec: number, 
+  endSec: number,
+  fadeInSec: number = 0,
+  fadeOutSec: number = 0
+): Blob {
   const sampleRate = audioBuffer.sampleRate;
   const numChannels = audioBuffer.numberOfChannels;
   
@@ -178,10 +241,10 @@ export function encodeOgg(audioBuffer: AudioBuffer, startSec: number, endSec: nu
   let pageSeqNum = 0;
   let granulePos = 0;
 
-  // Render original PCM channel data
+  // Render faded PCM channel data
   const channels: Float32Array[] = [];
   for (let c = 0; c < numChannels; c++) {
-    channels.push(audioBuffer.getChannelData(c));
+    channels.push(getFadedChannelData(audioBuffer, c, startSec, endSec, fadeInSec, fadeOutSec));
   }
 
   const rawPcmBuffer = new ArrayBuffer(pcmSize);
@@ -190,8 +253,7 @@ export function encodeOgg(audioBuffer: AudioBuffer, startSec: number, endSec: nu
 
   for (let i = 0; i < numSamples; i++) {
     for (let c = 0; c < numChannels; c++) {
-      const sampleIndex = startOffset + i;
-      let sample = channels[c][sampleIndex];
+      let sample = channels[c][i];
       if (sample > 1) sample = 1;
       else if (sample < -1) sample = -1;
       const s = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
@@ -275,7 +337,13 @@ export function encodeOgg(audioBuffer: AudioBuffer, startSec: number, endSec: nu
  * 4. FLAC Encoder (Free Lossless Audio Codec)
  * Creates standard FLAC format stream wrapper with StreamInfo meta-blocks for players
  */
-export function encodeFlac(audioBuffer: AudioBuffer, startSec: number, endSec: number): Blob {
+export function encodeFlac(
+  audioBuffer: AudioBuffer, 
+  startSec: number, 
+  endSec: number,
+  fadeInSec: number = 0,
+  fadeOutSec: number = 0
+): Blob {
   const sampleRate = audioBuffer.sampleRate;
   const numChannels = audioBuffer.numberOfChannels;
   
@@ -293,36 +361,30 @@ export function encodeFlac(audioBuffer: AudioBuffer, startSec: number, endSec: n
   flacChunks.push(sigBuffer);
 
   // Metadata block: STREAMINFO (34 bytes)
-  // [Block Header: 4 bytes] [Metadata Block StreamInfo: 34 bytes]
   const infoBlockBuffer = new ArrayBuffer(38);
   const infoView = new DataView(infoBlockBuffer);
   
-  // Header: Last-metadata-block flag (bit 1 = 1), Block type (bit 2-7 = 0 for StreamInfo), Block length (3 bytes = 34)
-  infoView.setUint8(0, 0x80); // 10000000 in binary: last block + type 0
+  infoView.setUint8(0, 0x80); // last block + type 0
   infoView.setUint8(1, 0);
   infoView.setUint16(2, 34, true);
 
-  // StreamInfo packet details
   infoView.setUint16(4, 1152, true); // Min block size
   infoView.setUint16(6, 1152, true); // Max block size
   infoView.setUint32(8, 0, true); // Min frame size placeholder
   infoView.setUint32(12, 0, true); // Max frame size placeholder
   
-  // Sample rate (20 bits), Number of channels (3 bits), Bits per sample (5 bits), Total samples (36 bits)
-  // Pack samplerate, channels and bit depth elegantly
   const srChanBits = (sampleRate << 12) | ((numChannels - 1) << 9) | (15 << 4); // 16 bits = 15
   infoView.setUint32(16, srChanBits, true);
   infoView.setUint32(20, numSamples & 0xFFFFFFFF, true);
 
-  // MD5 signature of uncompressed audio (16 bytes placeholder)
   writeString(infoView, 24, 'AcousticSplitPCM');
 
   flacChunks.push(infoBlockBuffer);
 
-  // Render raw audio frames
+  // Render faded audio frames
   const channels: Float32Array[] = [];
   for (let c = 0; c < numChannels; c++) {
-    channels.push(audioBuffer.getChannelData(c));
+    channels.push(getFadedChannelData(audioBuffer, c, startSec, endSec, fadeInSec, fadeOutSec));
   }
 
   const rawPcmBuffer = new ArrayBuffer(pcmSize);
@@ -331,8 +393,7 @@ export function encodeFlac(audioBuffer: AudioBuffer, startSec: number, endSec: n
 
   for (let i = 0; i < numSamples; i++) {
     for (let c = 0; c < numChannels; c++) {
-      const sampleIndex = startOffset + i;
-      let sample = channels[c][sampleIndex];
+      let sample = channels[c][i];
       if (sample > 1) sample = 1;
       else if (sample < -1) sample = -1;
       const s = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
@@ -350,7 +411,13 @@ export function encodeFlac(audioBuffer: AudioBuffer, startSec: number, endSec: n
  * 5. AAC / M4A Format Exporter (Lossless container placeholder wrapper)
  * Creates high-fidelity compressed audio suitable for Apple Ecosystem and generic media
  */
-export function encodeAac(audioBuffer: AudioBuffer, startSec: number, endSec: number): Blob {
+export function encodeAac(
+  audioBuffer: AudioBuffer, 
+  startSec: number, 
+  endSec: number,
+  fadeInSec: number = 0,
+  fadeOutSec: number = 0
+): Blob {
   const sampleRate = audioBuffer.sampleRate;
   const numChannels = audioBuffer.numberOfChannels;
   
@@ -395,10 +462,10 @@ export function encodeAac(audioBuffer: AudioBuffer, startSec: number, endSec: nu
   writeString(mdatHeaderView, 4, 'mdat');
   chunks.push(mdatHeaderBuffer);
 
-  // Render raw PCM audio frames inside MDAT payload
+  // Render faded PCM audio frames inside MDAT payload
   const channels: Float32Array[] = [];
   for (let c = 0; c < numChannels; c++) {
-    channels.push(audioBuffer.getChannelData(c));
+    channels.push(getFadedChannelData(audioBuffer, c, startSec, endSec, fadeInSec, fadeOutSec));
   }
 
   const rawPcmBuffer = new ArrayBuffer(pcmSize);
@@ -407,8 +474,7 @@ export function encodeAac(audioBuffer: AudioBuffer, startSec: number, endSec: nu
 
   for (let i = 0; i < numSamples; i++) {
     for (let c = 0; c < numChannels; c++) {
-      const sampleIndex = startOffset + i;
-      let sample = channels[c][sampleIndex];
+      let sample = channels[c][i];
       if (sample > 1) sample = 1;
       else if (sample < -1) sample = -1;
       const s = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;

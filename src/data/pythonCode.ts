@@ -171,6 +171,13 @@ class AudioEngine:
             
             cut_audio = audio[start_ms:end_ms]
             
+            fade_in_sec = seg.get("fade_in", 0.0)
+            fade_out_sec = seg.get("fade_out", 0.0)
+            if fade_in_sec > 0:
+                cut_audio = cut_audio.fade_in(int(fade_in_sec * 1000))
+            if fade_out_sec > 0:
+                cut_audio = cut_audio.fade_out(int(fade_out_sec * 1000))
+            
             raw_name = seg.get("filename", f"segment_{seg['id']}")
             safe_name = "".join(c for c in raw_name if c.isalnum() or c in (' ', '_', '-')).rstrip()
             if not safe_name:
@@ -855,14 +862,18 @@ Aplikasi ini mendukung tombol alternatif lengkap agar proses mengetuk menjadi sa
         header_frame.grid_columnconfigure(2, weight=1) # TEKS SEGMEN / LIRIK
         header_frame.grid_columnconfigure(3, weight=0) # START (S)
         header_frame.grid_columnconfigure(4, weight=0) # END (S)
-        header_frame.grid_columnconfigure(5, weight=0) # DEL
+        header_frame.grid_columnconfigure(5, weight=0) # IN (S)
+        header_frame.grid_columnconfigure(6, weight=0) # OUT (S)
+        header_frame.grid_columnconfigure(7, weight=0) # DEL
         
         ctk.CTkLabel(header_frame, text="ID", font=ctk.CTkFont(size=10, weight="bold"), width=30).grid(row=0, column=0, padx=2)
         ctk.CTkLabel(header_frame, text="PUTAR", font=ctk.CTkFont(size=10, weight="bold"), width=45).grid(row=0, column=1, padx=2)
         ctk.CTkLabel(header_frame, text="TEKS SEGMEN / LIRIK", font=ctk.CTkFont(size=10, weight="bold"), anchor="w").grid(row=0, column=2, padx=2, sticky="ew")
-        ctk.CTkLabel(header_frame, text="START (S)", font=ctk.CTkFont(size=10, weight="bold"), width=65).grid(row=0, column=3, padx=2)
-        ctk.CTkLabel(header_frame, text="END (S)", font=ctk.CTkFont(size=10, weight="bold"), width=65).grid(row=0, column=4, padx=2)
-        ctk.CTkLabel(header_frame, text="DEL", font=ctk.CTkFont(size=10, weight="bold"), width=35).grid(row=0, column=5, padx=2)
+        ctk.CTkLabel(header_frame, text="START (S)", font=ctk.CTkFont(size=10, weight="bold"), width=55).grid(row=0, column=3, padx=2)
+        ctk.CTkLabel(header_frame, text="END (S)", font=ctk.CTkFont(size=10, weight="bold"), width=55).grid(row=0, column=4, padx=2)
+        ctk.CTkLabel(header_frame, text="IN (S)", font=ctk.CTkFont(size=10, weight="bold"), width=45).grid(row=0, column=5, padx=2)
+        ctk.CTkLabel(header_frame, text="OUT (S)", font=ctk.CTkFont(size=10, weight="bold"), width=45).grid(row=0, column=6, padx=2)
+        ctk.CTkLabel(header_frame, text="DEL", font=ctk.CTkFont(size=10, weight="bold"), width=35).grid(row=0, column=7, padx=2)
         
         # Display each segment row
         for idx, seg in enumerate(self.segments):
@@ -874,7 +885,9 @@ Aplikasi ini mendukung tombol alternatif lengkap agar proses mengetuk menjadi sa
             row_frame.grid_columnconfigure(2, weight=1) # TEKS SEGMEN / LIRIK
             row_frame.grid_columnconfigure(3, weight=0) # START (S)
             row_frame.grid_columnconfigure(4, weight=0) # END (S)
-            row_frame.grid_columnconfigure(5, weight=0) # DEL
+            row_frame.grid_columnconfigure(5, weight=0) # IN (S)
+            row_frame.grid_columnconfigure(6, weight=0) # OUT (S)
+            row_frame.grid_columnconfigure(7, weight=0) # DEL
             
             # ID
             lbl_id = ctk.CTkLabel(row_frame, text=f"#{seg['id']:02d}", font=ctk.CTkFont(family="Courier", size=11, weight="bold"), width=30)
@@ -891,19 +904,29 @@ Aplikasi ini mendukung tombol alternatif lengkap agar proses mengetuk menjadi sa
             entry_text.insert(0, seg.get("text", ""))
             
             # Start entry
-            entry_start = ctk.CTkEntry(row_frame, width=65, height=22, border_width=1, border_color="#2a2b2f", fg_color="#0e0f11", text_color="#00ffff", font=("Courier", 10))
+            entry_start = ctk.CTkEntry(row_frame, width=55, height=22, border_width=1, border_color="#2a2b2f", fg_color="#0e0f11", text_color="#00ffff", font=("Courier", 10))
             entry_start.grid(row=0, column=3, padx=2)
             entry_start.insert(0, f"{seg['start']:.2f}")
             
             # End entry
-            entry_end = ctk.CTkEntry(row_frame, width=65, height=22, border_width=1, border_color="#2a2b2f", fg_color="#0e0f11", text_color="#00ffff", font=("Courier", 10))
+            entry_end = ctk.CTkEntry(row_frame, width=55, height=22, border_width=1, border_color="#2a2b2f", fg_color="#0e0f11", text_color="#00ffff", font=("Courier", 10))
             entry_end.grid(row=0, column=4, padx=2)
             entry_end.insert(0, f"{seg['end']:.2f}")
+
+            # Fade In entry
+            entry_fade_in = ctk.CTkEntry(row_frame, width=45, height=22, border_width=1, border_color="#2a2b2f", fg_color="#0e0f11", text_color="#ffbb00", font=("Courier", 10))
+            entry_fade_in.grid(row=0, column=5, padx=2)
+            entry_fade_in.insert(0, f"{seg.get('fade_in', 0.0):.2f}")
+
+            # Fade Out entry
+            entry_fade_out = ctk.CTkEntry(row_frame, width=45, height=22, border_width=1, border_color="#2a2b2f", fg_color="#0e0f11", text_color="#ffbb00", font=("Courier", 10))
+            entry_fade_out.grid(row=0, column=6, padx=2)
+            entry_fade_out.insert(0, f"{seg.get('fade_out', 0.0):.2f}")
             
             # Delete button
             btn_del = ctk.CTkButton(row_frame, text="❌", width=30, height=22, fg_color="#d62728", hover_color="#ad1e1e",
                                     command=lambda i=idx: self.delete_segment(i))
-            btn_del.grid(row=0, column=5, padx=2)
+            btn_del.grid(row=0, column=7, padx=2)
             
             # Store row widgets
             self.segment_rows.append({
@@ -911,7 +934,9 @@ Aplikasi ini mendukung tombol alternatif lengkap agar proses mengetuk menjadi sa
                 "segment_id": seg["id"],
                 "entry_text": entry_text,
                 "entry_start": entry_start,
-                "entry_end": entry_end
+                "entry_end": entry_end,
+                "entry_fade_in": entry_fade_in,
+                "entry_fade_out": entry_fade_out
             })
             
         self.lbl_segment_count.configure(text=f"{len(self.segments)} Segments")
@@ -953,6 +978,8 @@ Aplikasi ini mendukung tombol alternatif lengkap agar proses mengetuk menjadi sa
             "text": f"Segmen Baru #{new_id}",
             "start": round(start_t, 2),
             "end": round(end_t, 2),
+            "fade_in": 0.0,
+            "fade_out": 0.0,
             "confidence": 100,
             "filename": f"{new_id:02d}_segmen_baru"
         })
@@ -975,17 +1002,23 @@ Aplikasi ini mendukung tombol alternatif lengkap agar proses mengetuk menjadi sa
                 text = row["entry_text"].get().strip()
                 start = float(row["entry_start"].get().strip())
                 end = float(row["entry_end"].get().strip())
+                fade_in = float(row["entry_fade_in"].get().strip())
+                fade_out = float(row["entry_fade_out"].get().strip())
                 
                 if start < 0 or end < 0:
                     raise ValueError("Waktu mulai/selesai tidak boleh negatif.")
                 if start >= end:
                     raise ValueError("Waktu mulai harus lebih kecil dari waktu selesai.")
+                if fade_in < 0 or fade_out < 0:
+                    raise ValueError("Durasi fade tidak boleh negatif.")
                     
                 updated_segs.append({
                     "id": row["segment_id"],
                     "text": text,
                     "start": start,
                     "end": end,
+                    "fade_in": fade_in,
+                    "fade_out": fade_out,
                     "confidence": 100,
                     "filename": f"{row['segment_id']:02d}_" + "".join(c for c in text.lower() if c.isalnum() or c==' ').strip().replace(' ', '_')[:15]
                 })

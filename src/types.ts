@@ -6,6 +6,8 @@ export interface AudioSegment {
   filename?: string;
   confidence?: number;
   isPlaying?: boolean;
+  fadeIn?: number;
+  fadeOut?: number;
 }
 
 export interface AudioMetadata {
